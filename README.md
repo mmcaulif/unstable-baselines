@@ -4,10 +4,10 @@
 ## To do list:
 * double dqn and dueling dqn
 * make epsilon_greedy jit'able
-* implement vmap and jit'able huber loss 
-* replay buffer class
+* implement a vmap'able and jit'able huber loss function
+* make a replay buffer class
 * clean up dqn
-* separate environment and algo's
+* seperate environment and algo's
 * make algo's environment agnostic
-* make an init netowrk function network 
+* make 'transform' into a seperate function that can be wrapped around an agent to initialise it
 * make a baseline class
