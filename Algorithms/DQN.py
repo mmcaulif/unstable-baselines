@@ -41,8 +41,7 @@ class Transition(NamedTuple):
 
 class DQN:
     def __init__(self,
-                 model,
-                 init_params,
+                 #model,
                  learning_rate=0.0001,
                  buffer_size=1000000,
                  learning_starts=50000,
@@ -53,7 +52,7 @@ class DQN:
                  epsilon=1,
                  max_grad_norm=10):
                  
-        self.forward = model
+        #self.forward = model
 
         self.learning_rate = learning_rate
         self.buffer_size = buffer_size
@@ -65,11 +64,17 @@ class DQN:
         self.epsilon = epsilon
         self.max_grad_norm = max_grad_norm
 
-        LR_SCHEDULE = optax.linear_schedule(self.learning_rate, 0, TRAIN_STEPS, self.learning_starts)
-        self.optimizer = optax.chain(optax.clip_by_global_norm(self.max_grad_norm), optax.adam(learning_rate=LR_SCHEDULE))
+        #LR_SCHEDULE = optax.linear_schedule(self.learning_rate, 0, TRAIN_STEPS, self.learning_starts)
+        #self.optimizer = optax.chain(optax.clip_by_global_norm(self.max_grad_norm), optax.adam(learning_rate=LR_SCHEDULE))
         
-    def init_optim(self, params):
-        return self.optimizer.init(params)
+    def transform(self, rng, optimizer, model):
+        self.optimizer = optimizer
+        init_params = model.init(rng, jnp.ones(4))
+        self.forward = hk.without_apply_rng(net).apply
+        init_optim_state = self.optimizer.init(init_params)
+        target_params = hk.data_structures.to_immutable_dict(init_params)
+        print("model initialised")
+        return init_optim_state, init_params, target_params
 
     def q_loss_fn(self, Q_s, Q_sp1, a_t, r_t, done):
         Q_target = r_t + GAMMA * Q_sp1.max() * (1 - done)
@@ -124,12 +129,14 @@ env = gym.make('CartPole-v0')
 env = RecordEpisodeStatistics(env)
 # experience replay:
 replay_buffer = deque(maxlen=BUFFER_SIZE)
+rng = jax.random.PRNGKey(42)
 
-params = net.init(jax.random.PRNGKey(42), jnp.ones(4))
-target_params = hk.data_structures.to_immutable_dict(params)
+dqn_agent = DQN()
 
-dqn_agent = DQN(model=hk.without_apply_rng(net).apply, init_params=params)
-optim_state = dqn_agent.init_optim(params)
+LR_SCHEDULE = optax.linear_schedule(dqn_agent.learning_rate, 0, TRAIN_STEPS, dqn_agent.learning_starts)
+optimizer = optax.chain(optax.clip_by_global_norm(dqn_agent.max_grad_norm), optax.adam(learning_rate=LR_SCHEDULE))
+model = net
+optim_state, params, target_params = dqn_agent.transform(rng, optimizer, model)
 
 s_t = env.reset()
 G = []
