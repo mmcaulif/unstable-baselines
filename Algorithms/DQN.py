@@ -1,4 +1,3 @@
-from abc import ABC
 import jax
 import jax.nn
 import jax.numpy as jnp
@@ -17,20 +16,11 @@ from functools import partial
 # tell JAX to use CPU, cpu is faster on small networks
 os.environ.setdefault('JAX_PLATFORM_NAME', 'cpu')
 
-# Hyper parameters from stable baselines3 - https://stable-baselines3.readthedocs.io/en/master/modules/dqn.html
-GAMMA = 0.99
 BUFFER_SIZE = 1000000
 TRAIN_STEPS = 300000
 TARGET_UPDATE = 10000
 VERBOSE_UPDATE = 1000
 EPSILON = 1
-BATCH_SIZE = 32
-LEARNING_RATE = 0.0001
-#TRAIN_START = 50000
-#LR_SCHEDULE = optax.linear_schedule(LEARNING_RATE, 0, TRAIN_STEPS, 50000)
-
-# Functions
-
 
 class Transition(NamedTuple):
     s: list  # state
@@ -41,7 +31,6 @@ class Transition(NamedTuple):
 
 class DQN:
     def __init__(self,
-                 #model,
                  learning_rate=0.0001,
                  buffer_size=1000000,
                  learning_starts=50000,
@@ -50,10 +39,8 @@ class DQN:
                  train_freq=4,
                  target_update_interval=10000,
                  epsilon=1,
-                 max_grad_norm=10):
+                 max_grad_norm=10): # Hyper parameters from stable baselines3 - https://stable-baselines3.readthedocs.io/en/master/modules/dqn.html
                  
-        #self.forward = model
-
         self.learning_rate = learning_rate
         self.buffer_size = buffer_size
         self.learning_starts = learning_starts
@@ -64,20 +51,17 @@ class DQN:
         self.epsilon = epsilon
         self.max_grad_norm = max_grad_norm
 
-        #LR_SCHEDULE = optax.linear_schedule(self.learning_rate, 0, TRAIN_STEPS, self.learning_starts)
-        #self.optimizer = optax.chain(optax.clip_by_global_norm(self.max_grad_norm), optax.adam(learning_rate=LR_SCHEDULE))
-        
     def transform(self, rng, optimizer, model):
         self.optimizer = optimizer
         init_params = model.init(rng, jnp.ones(4))
-        self.forward = hk.without_apply_rng(net).apply
+        self.forward = hk.without_apply_rng(model).apply
         init_optim_state = self.optimizer.init(init_params)
         target_params = hk.data_structures.to_immutable_dict(init_params)
         print("model initialised")
         return init_optim_state, init_params, target_params
 
     def q_loss_fn(self, Q_s, Q_sp1, a_t, r_t, done):
-        Q_target = r_t + GAMMA * Q_sp1.max() * (1 - done)
+        Q_target = r_t + self.gamma * Q_sp1.max() * (1 - done)
         return (Q_s[a_t] - Q_target)
 
     @partial(jax.jit, static_argnums = 0)
@@ -115,7 +99,7 @@ class DQN:
 
 # initialisations
 @hk.transform  # stable baselines3 dqn network is input_dim, 64, 64, output_dim
-def net(S):
+def vanilla_net(S):
     seq = hk.Sequential([
         hk.Linear(64), jax.nn.relu,
         hk.Linear(64), jax.nn.relu,
@@ -123,19 +107,37 @@ def net(S):
     ])
     return seq(S)
 
+@hk.transform 
+def dueling_net(S):
+    val = hk.Sequential([
+        hk.Linear(32), jax.nn.relu,
+        hk.Linear(32), jax.nn.relu,
+        hk.Linear(1),
+    ])
+
+    adv = hk.Sequential([
+        hk.Linear(32), jax.nn.relu,
+        hk.Linear(32), jax.nn.relu,
+        hk.Linear(env.action_space.n),
+    ])
+
+    return val(S) + adv(S)
 
 # environment:
 env = gym.make('CartPole-v0')
 env = RecordEpisodeStatistics(env)
-# experience replay:
-replay_buffer = deque(maxlen=BUFFER_SIZE)
-rng = jax.random.PRNGKey(42)
 
+# agent
 dqn_agent = DQN()
 
+# experience replay:
+replay_buffer = deque(maxlen=dqn_agent.buffer_size)
+
+# initialisation
+rng = jax.random.PRNGKey(42)
 LR_SCHEDULE = optax.linear_schedule(dqn_agent.learning_rate, 0, TRAIN_STEPS, dqn_agent.learning_starts)
 optimizer = optax.chain(optax.clip_by_global_norm(dqn_agent.max_grad_norm), optax.adam(learning_rate=LR_SCHEDULE))
-model = net
+model = dueling_net
 optim_state, params, target_params = dqn_agent.transform(rng, optimizer, model)
 
 s_t = env.reset()
@@ -144,15 +146,12 @@ G = []
 for i in range(1, TRAIN_STEPS):
     a_t = dqn_agent.epsilon_greedy(jnp.asarray(s_t), params)
 
-    #q_vals = dqn_agent.forward(params, jnp.asarray(s_t))
-    #a_t = int(jnp.argmax(q_vals))
-
     s_tp1, r_t, done, info = env.step(a_t)    
 
     replay_buffer.append([s_t, a_t, r_t, s_tp1, done])
 
-    if i > dqn_agent.learning_starts and len(replay_buffer) > BATCH_SIZE:
-        batch = Transition(*zip(*random.sample(replay_buffer, k=BATCH_SIZE)))
+    if i % dqn_agent.train_freq == 0 and i > dqn_agent.learning_starts and len(replay_buffer) > dqn_agent.batch_size:
+        batch = Transition(*zip(*random.sample(replay_buffer, k=dqn_agent.batch_size)))
         loss, params, optim_state = dqn_agent.update(params, target_params, optim_state, batch)
 
     s_t = s_tp1
