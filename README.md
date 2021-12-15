@@ -13,3 +13,4 @@
 * make a baseline class
 * create logging function
 * create train on env function
+* clean up vmap usage in dqn. dont use two seperate loss functions, use: jax.vmap(partial(func, non vector parameters))(vector parameters)
