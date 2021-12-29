@@ -17,7 +17,7 @@ from functools import partial
 os.environ.setdefault('JAX_PLATFORM_NAME', 'cpu')
 
 BUFFER_SIZE = 1000000
-TRAIN_STEPS = 300000
+TRAIN_STEPS = 1500000
 TARGET_UPDATE = 10000
 VERBOSE_UPDATE = 1000
 EPSILON = 1
@@ -51,9 +51,9 @@ class DQN:
         self.epsilon = epsilon
         self.max_grad_norm = max_grad_norm
 
-    def transform(self, rng, optimizer, model):
+    def transform(self, rng, optimizer, model, obs_dims):
         self.optimizer = optimizer
-        init_params = model.init(rng, jnp.ones(4))
+        init_params = model.init(rng, obs_dims)
         self.forward = hk.without_apply_rng(model).apply
         init_optim_state = self.optimizer.init(init_params)
         target_params = hk.data_structures.to_immutable_dict(init_params)
@@ -124,7 +124,7 @@ def dueling_net(S):
     return val(S) + adv(S)
 
 # environment:
-env = gym.make('CartPole-v0')
+env = gym.make('LunarLander-v2')   #gym.make('CartPole-v0')
 env = RecordEpisodeStatistics(env)
 
 # agent
@@ -138,9 +138,11 @@ rng = jax.random.PRNGKey(42)
 LR_SCHEDULE = optax.linear_schedule(dqn_agent.learning_rate, 0, TRAIN_STEPS, dqn_agent.learning_starts)
 optimizer = optax.chain(optax.clip_by_global_norm(dqn_agent.max_grad_norm), optax.adam(learning_rate=LR_SCHEDULE))
 model = dueling_net
-optim_state, params, target_params = dqn_agent.transform(rng, optimizer, model)
+dimensions = jnp.ones(env.observation_space.shape[0])
+optim_state, params, target_params = dqn_agent.transform(rng, optimizer, model, dimensions)
 
 s_t = env.reset()
+E = 0
 G = []
 
 for i in range(1, TRAIN_STEPS):
@@ -160,6 +162,8 @@ for i in range(1, TRAIN_STEPS):
             target_params = hk.data_structures.to_immutable_dict(params)
 
     if done:
+        E += 1  #should solve lunar lander in ~1200 episodes
+        print('Episode: ', E, 'done!')
         G.append(int(info['episode']['r']))
         s_t = env.reset()
 
