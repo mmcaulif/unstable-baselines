@@ -15,3 +15,4 @@
 * clean up vmap usage in dqn. dont use two seperate loss functions, use: jax.vmap(partial(func, non vector parameters))(vector parameters) - need to look back at this
 * focus on ddpg while struggling to debug a2c, maybe try implement multi-step
 * get q-function portion of ddpg working then policy, then convert to td3
+* est dqn on LunarLander

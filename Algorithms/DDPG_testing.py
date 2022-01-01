@@ -1,4 +1,3 @@
-from re import S
 import jax
 import jax.nn
 import jax.numpy as jnp
@@ -9,7 +8,7 @@ from collections import deque
 from typing import NamedTuple
 import optax
 import gym
-from gym.wrappers import RecordEpisodeStatistics
+from gym.wrappers import TimeLimit
 import random
 import os
 from functools import partial
@@ -107,7 +106,7 @@ def q_val(S, A):
 
 # experience replay:
 replay_buffer = deque(maxlen=1000000)
-env = gym.make('Pendulum-v1')
+env = TimeLimit(gym.make('Pendulum-v1'))
 
 rng = jax.random.PRNGKey(42)
 
@@ -123,12 +122,12 @@ q_optimizer = optax.adam(3e-4)
 q_optim_state = q_optimizer.init(q_params)
 
 pi_optimizer = optax.adam(3e-4)
-pi_optim_state = pi_optimizer.init(q_params)
+pi_optim_state = pi_optimizer.init(pi_params)
 
 polask_avg = lambda target, params: (1 - 0.005) * target + 0.005 * params
 
 s_t = env.reset()
-G = []
+avg_r = []
 avg_loss = []
 
 for i in range(1, TRAIN_STEPS): #https://stable-baselines.readthedocs.io/en/master/modules/ddpg.html
@@ -137,6 +136,10 @@ for i in range(1, TRAIN_STEPS): #https://stable-baselines.readthedocs.io/en/mast
 
     s_tp1, r_t, done, info = env.step(a_t)    
 
+    r_t = r_t / 16.2736044 #reward scaling?
+
+    avg_r.append(r_t)
+
     replay_buffer.append([s_t, a_t, r_t, s_tp1, done])
 
     if len(replay_buffer) > 128:
@@ -144,14 +147,13 @@ for i in range(1, TRAIN_STEPS): #https://stable-baselines.readthedocs.io/en/mast
         q_loss, q_params, q_optim_state = critic_update(q_params, q_params_t, pi_params_t, q_optim_state, batch)            
         avg_loss.append(q_loss)
 
-        if i % 2 == 0:
+        if i % 2 == 0:  #td3 policy update delay
             pi_params, pi_optim_state = policy_update(pi_params, q_params, pi_optim_state, batch)
 
-        if i % 100 == 0:
-            #print('Episodes:', i, 'critic loss:', loss)
-            print('Episodes:', i, 'avg. critic loss:', sum(avg_loss[-100:])/100)
-
         if i % 1000 == 0:
+            print('Episodes:', i, '| avg. reward', sum(avg_r[-1000:])/1000, '| avg. critic loss:', sum(avg_loss[-1000:])/1000)
+
+        if i % 50 == 0:
             q_params_t = jax.tree_multimap(polask_avg, q_params_t, q_params)
             pi_params_t = jax.tree_multimap(polask_avg, pi_params_t, pi_params)
 
