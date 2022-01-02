@@ -94,7 +94,7 @@ class DQN:
             a_t = env.action_space.sample()
         else:
             a_t = int(jnp.argmax(self.forward(params, s_t)))
-        self.epsilon = self.epsilon * 0.99
+        
         return a_t
 
 # initialisations
@@ -128,18 +128,18 @@ env = gym.make('LunarLander-v2')   #gym.make('CartPole-v0')
 env = RecordEpisodeStatistics(env)
 
 # agent
-dqn_agent = DQN()
+dqn_agent = DQN(buffer_size=100000, learning_starts=1000, batch_size=64)
 
 # experience replay:
 replay_buffer = deque(maxlen=dqn_agent.buffer_size)
 
 # initialisation
-rng = jax.random.PRNGKey(42)
+rng = jax.random.PRNGKey(1)
 LR_SCHEDULE = optax.linear_schedule(dqn_agent.learning_rate, 0, TRAIN_STEPS, dqn_agent.learning_starts)
 optimizer = optax.chain(optax.clip_by_global_norm(dqn_agent.max_grad_norm), optax.adam(learning_rate=LR_SCHEDULE))
-model = dueling_net
+#model = dueling_net
 dimensions = jnp.ones(env.observation_space.shape[0])
-optim_state, params, target_params = dqn_agent.transform(rng, optimizer, model, dimensions)
+optim_state, params, target_params = dqn_agent.transform(rng, optimizer, vanilla_net, dimensions)
 
 s_t = env.reset()
 E = 0
@@ -162,6 +162,10 @@ for i in range(1, TRAIN_STEPS):
             target_params = hk.data_structures.to_immutable_dict(params)
 
     if done:
+        #dqn_agent.epsilon = np.max(0.01, dqn_agent.epsilon * 0.995)  #epsilon update is done at end of episode
+        dqn_agent.epsilon = dqn_agent.epsilon * 0.995
+        dqn_agent.epsilon = jnp.max(0.01, dqn_agent.epsilon)
+
         E += 1  #should solve lunar lander in ~1200 episodes
         print('Episode: ', E, 'done!')
         G.append(int(info['episode']['r']))

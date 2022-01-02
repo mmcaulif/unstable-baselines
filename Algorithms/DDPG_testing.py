@@ -21,6 +21,7 @@ TRAIN_STEPS = 300000
 TARGET_UPDATE = 10000
 VERBOSE_UPDATE = 1000
 EPSILON = 1
+TAU = 0.001
 
 class Transition(NamedTuple):
     s: list  # state
@@ -56,7 +57,7 @@ def critic_update(q_params, q_params_t, pi_params_t, q_optim_state, batch):
     a_t = jnp.array(batch.a, dtype=jnp.int32)
     r_t = jnp.array(batch.r, dtype=jnp.float32)
     s_tp1 = jnp.array(batch.s_p, dtype=jnp.float32)
-    done = jnp.array(batch.d, dtype=jnp.float32)
+    done = jnp.array(batch.d, dtype=jnp.float32)    #move all this to a replay buffer class
 
     q_loss, q_grads = jax.value_and_grad(critic_loss)(q_params, q_params_t, pi_params_t, s_t, a_t, r_t, s_tp1, done)
     updates, q_optim_state = q_optimizer.update(q_grads, q_optim_state, q_params)
@@ -105,7 +106,7 @@ def q_val(S, A):
     return q_seq(s_seq(S) + a_seq(A))
 
 # experience replay:
-replay_buffer = deque(maxlen=1000000)
+replay_buffer = deque(maxlen=10000)
 env = TimeLimit(gym.make('Pendulum-v1'))
 
 rng = jax.random.PRNGKey(42)
@@ -118,13 +119,13 @@ pi_params = policy.init(rng, jnp.ones(env.observation_space.shape[0]))
 pi_params_t = hk.data_structures.to_immutable_dict(pi_params)
 pi_forward = hk.without_apply_rng(policy).apply
 
-q_optimizer = optax.adam(3e-4)
+q_optimizer = optax.adam(1e-3)
 q_optim_state = q_optimizer.init(q_params)
 
-pi_optimizer = optax.adam(3e-4)
+pi_optimizer = optax.adam(1e-4)
 pi_optim_state = pi_optimizer.init(pi_params)
 
-polask_avg = lambda target, params: (1 - 0.005) * target + 0.005 * params
+polask_avg = lambda target, params: (1 - TAU) * target + TAU * params
 
 s_t = env.reset()
 avg_r = []
