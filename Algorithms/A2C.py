@@ -7,7 +7,6 @@ import haiku as hk
 import optax
 import gym
 from gym.wrappers import RecordEpisodeStatistics
-import random
 import os
 from functools import partial
 
@@ -20,13 +19,11 @@ VERBOSE_UPDATE = 1000
 class A2C:
     def __init__(self,
                  learning_rate=0.0007,
-                 epsilon=1,
                  value_coeff = 0.5,
                  entropy_coeff=0.001,
                  max_grad_norm=0.5): # Hyper parameters from stable baselines3 - https://stable-baselines3.readthedocs.io/en/master/modules/dqn.html
                  
         self.learning_rate = learning_rate
-        self.epsilon = epsilon
         self.value_coeff = value_coeff
         self.entropy_coeff = entropy_coeff
         self.max_grad_norm = max_grad_norm
@@ -103,7 +100,7 @@ model = a2c_net
 optim_state, params = agent.transform(rng, optimizer, model)
 
 s_t = env.reset()
-E = 0
+episodes = 0
 G = []
 
 for i in range(1, TRAIN_STEPS):
@@ -118,7 +115,7 @@ for i in range(1, TRAIN_STEPS):
 
     if done:
         G.append(int(info['episode']['r']))
-        E += 1
+        episodes += 1
         #print('Episode', E, 'done!')
         s_t = env.reset()
 

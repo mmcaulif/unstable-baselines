@@ -17,7 +17,7 @@ from functools import partial
 os.environ.setdefault('JAX_PLATFORM_NAME', 'cpu')
 
 BUFFER_SIZE = 1000000
-TRAIN_STEPS = 300000
+EPISODES = 300000
 TARGET_UPDATE = 10000
 VERBOSE_UPDATE = 1000
 EPSILON = 1
@@ -45,7 +45,7 @@ def critic_loss(q_params, q_params_t, pi_params_t, s_t, a_t, r_t, s_tp1, done):
     Q_s = q_forward(q_params, s_t, a_t)
     
     a_pi = noisy_action(pi_forward(pi_params_t, s_tp1))   #td3 style policy smoothing
-    #a_pi = pi(pi_params, s_tp1)
+    #a_pi = pi_forward(pi_params_t, s_tp1)
     Q_sp1 = stop_gradient(q_forward(q_params_t, s_tp1, a_pi))
 
     losses = jax.vmap(q_loss_fn)(Q_s, Q_sp1, r_t, done)
@@ -130,37 +130,32 @@ polask_avg = lambda target, params: (1 - TAU) * target + TAU * params
 s_t = env.reset()
 avg_r = []
 avg_loss = []
+t = 0
 
-for i in range(1, TRAIN_STEPS): #https://stable-baselines.readthedocs.io/en/master/modules/ddpg.html
+for e in range(1, EPISODES): #https://stable-baselines.readthedocs.io/en/master/modules/ddpg.html
 
-    a_t = pi_forward(pi_params, s_t)
+    while True:
+        t += 1
+        a_t = pi_forward(pi_params, s_t)
+        s_tp1, r_t, done, info = env.step(a_t)
+        if done:
+            break
+        avg_r.append(r_t)
+        replay_buffer.append([s_t, a_t, r_t, s_tp1, done]) 
+        s_t = s_tp1
 
-    s_tp1, r_t, done, info = env.step(a_t)    
+    batch = Transition(*zip(*random.sample(replay_buffer, k=128)))
+    q_loss, q_params, q_optim_state = critic_update(q_params, q_params_t, pi_params_t, q_optim_state, batch)            
+    avg_loss.append(q_loss)
 
-    r_t = r_t / 16.2736044 #reward scaling?
+    if e % 2 == 0:  #td3 policy update delay
+        pi_params, pi_optim_state = policy_update(pi_params, q_params, pi_optim_state, batch)
+        q_params_t = jax.tree_multimap(polask_avg, q_params_t, q_params)
+        pi_params_t = jax.tree_multimap(polask_avg, pi_params_t, pi_params)
 
-    avg_r.append(r_t)
+    if e >= 100 and e % 100 == 0:
+        print(f'Episodes: {e} | Timesteps: {t} | avg. reward {sum(avg_r[-100:])/100} | avg. critic loss: {sum(avg_loss[-100:])/100}')
 
-    replay_buffer.append([s_t, a_t, r_t, s_tp1, done])
-
-    if len(replay_buffer) > 128:
-        batch = Transition(*zip(*random.sample(replay_buffer, k=128)))
-        q_loss, q_params, q_optim_state = critic_update(q_params, q_params_t, pi_params_t, q_optim_state, batch)            
-        avg_loss.append(q_loss)
-
-        if i % 2 == 0:  #td3 policy update delay
-            pi_params, pi_optim_state = policy_update(pi_params, q_params, pi_optim_state, batch)
-
-        if i % 1000 == 0:
-            print('Episodes:', i, '| avg. reward', sum(avg_r[-1000:])/1000, '| avg. critic loss:', sum(avg_loss[-1000:])/1000)
-
-        if i % 50 == 0:
-            q_params_t = jax.tree_multimap(polask_avg, q_params_t, q_params)
-            pi_params_t = jax.tree_multimap(polask_avg, pi_params_t, pi_params)
-
-    s_t = s_tp1
-
-    if done:
-        s_t = env.reset()
+    s_t = env.reset()
 
 env.close()

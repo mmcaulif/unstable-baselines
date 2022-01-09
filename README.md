@@ -15,4 +15,6 @@
 * clean up vmap usage in dqn. dont use two seperate loss functions, use: jax.vmap(partial(func, non vector parameters))(vector parameters) - need to look back at this
 * focus on ddpg while struggling to debug a2c, maybe try implement multi-step
 * get q-function portion of ddpg working then policy, then convert to td3
-* est dqn on LunarLander
+* test dqn on LunarLander
+* clean up dqn code a bit more
+* use stablebaselines3 and the environments to get targets in terms of learning for ddpg (pendulum-v1), a2c (1-step, cartpole) and dqn (in lunar lander)
