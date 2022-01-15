@@ -9,9 +9,13 @@ import gym
 from gym.wrappers import RecordEpisodeStatistics
 import os
 from functools import partial
+from collections import deque
 
 # tell JAX to use CPU, cpu is faster on small networks
 os.environ.setdefault('JAX_PLATFORM_NAME', 'cpu')
+
+
+#https://julien-vitay.net/deeprl/ActorCritic.html
 
 TRAIN_STEPS = 300000
 VERBOSE_UPDATE = 1000
@@ -21,12 +25,16 @@ class A2C:
                  learning_rate=0.0007,
                  value_coeff = 0.5,
                  entropy_coeff=0.001,
-                 max_grad_norm=0.5): # Hyper parameters from stable baselines3 - https://stable-baselines3.readthedocs.io/en/master/modules/dqn.html
+                 gamma=0.99,
+                 max_grad_norm=0.5,
+                 n_steps=5): # Hyper parameters from stable baselines3 - https://stable-baselines3.readthedocs.io/en/master/modules/dqn.html
                  
         self.learning_rate = learning_rate
         self.value_coeff = value_coeff
         self.entropy_coeff = entropy_coeff
+        self.gamma = gamma
         self.max_grad_norm = max_grad_norm
+        self.n_steps = n_steps
 
     def transform(self, rng, optimizer, model):
         self.optimizer = optimizer
@@ -71,6 +79,13 @@ class A2C:
         a_t = onp.random.choice(action_list, p=action_probs)
         return a_t
 
+    def get_n_step_value(self, trajectory):
+        n_step_v = 0
+        for i, v in enumerate(trajectory):
+            n_step_v += v * (self.gamma ** i) 
+        return n_step_v
+
+
 @hk.transform 
 def a2c_net(S):
     critic = hk.Sequential([
@@ -99,6 +114,8 @@ optimizer = optax.chain(optax.clip_by_global_norm(agent.max_grad_norm), optax.rm
 model = a2c_net
 optim_state, params = agent.transform(rng, optimizer, model)
 
+r_buffer = deque(maxlen=agent.n_steps)
+
 s_t = env.reset()
 episodes = 0
 G = []
@@ -109,11 +126,17 @@ for i in range(1, TRAIN_STEPS):
 
     s_tp1, r_t, done, info = env.step(a_t)    
 
+    r_buffer.append(r_t)
+
+    print(r_buffer)
+    print(agent.get_n_step_value(r_buffer))
+
     loss, params, optim_state = agent.update(params, s_t, a_t, r_t, optim_state)
 
     s_t = s_tp1
 
     if done:
+        r_buffer.clear()
         G.append(int(info['episode']['r']))
         episodes += 1
         #print('Episode', E, 'done!')
