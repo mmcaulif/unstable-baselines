@@ -73,17 +73,38 @@ class A2C:
         params = optax.apply_updates(params, updates)
         return loss, params, optim_state
 
-    def act(self, policy):
+    #@partial(jax.jit, static_argnums = 0)  #uses onp function, try swap out
+    def act(self, params, s_t):
+        _ , policy = self.forward(params, s_t)
         action_probs = onp.asanyarray(policy/jnp.sum(policy))
         action_list = jnp.arange(len(policy))
         a_t = onp.random.choice(action_list, p=action_probs)
         return a_t
 
+    #@partial(jax.jit, static_argnums = 0)
     def get_n_step_value(self, trajectory):
         n_step_v = 0
         for i, v in enumerate(trajectory):
             n_step_v += v * (self.gamma ** i) 
         return n_step_v
+
+    def rollout(self, params, s_t):
+        r_buffer = deque(maxlen=self.n_steps)
+        a_init = ()
+        for _ in range(self.n_steps):
+            a_t = self.act(params, s_t)
+            if not bool(a_init):
+                a_init = a_t
+                #print(f'filling in a_init with {a_t}')
+            s_tp1, r_t, done, info = env.step(a_t)
+            r_buffer.append(r_t)
+            if done:
+                break
+
+            s_t = s_tp1
+
+        v = self.get_n_step_value(r_buffer)
+        return a_init, s_t, v, done, info
 
 
 @hk.transform 
@@ -114,29 +135,26 @@ optimizer = optax.chain(optax.clip_by_global_norm(agent.max_grad_norm), optax.rm
 model = a2c_net
 optim_state, params = agent.transform(rng, optimizer, model)
 
-r_buffer = deque(maxlen=agent.n_steps)
-
 s_t = env.reset()
 episodes = 0
 G = []
 
 for i in range(1, TRAIN_STEPS):
-    _ , policy = agent.forward(params, s_t)
-    a_t = agent.act(policy)
+    
+    """a_t = agent.act(params, s_t)
+    s_tp1, r_t, done, info = env.step(a_t)""" 
 
-    s_tp1, r_t, done, info = env.step(a_t)    
 
-    r_buffer.append(r_t)
+    #loss, params, optim_state = agent.update(params, s_t, a_t, r_t, optim_state)
 
-    print(r_buffer)
-    print(agent.get_n_step_value(r_buffer))
+    #s_t = s_tp1
 
-    loss, params, optim_state = agent.update(params, s_t, a_t, r_t, optim_state)
+    a_t, s_t, v, done, info = agent.rollout(params, s_t)
+    #print(a_t, v)
 
-    s_t = s_tp1
+    loss, params, optim_state = agent.update(params, s_t, a_t, v, optim_state)
 
     if done:
-        r_buffer.clear()
         G.append(int(info['episode']['r']))
         episodes += 1
         #print('Episode', E, 'done!')
