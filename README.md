@@ -18,3 +18,4 @@
 * test dqn on LunarLander
 * clean up dqn code a bit more
 * use stablebaselines3 and the environments to get targets in terms of learning for ddpg (pendulum-v1), a2c (1-step, cartpole) and dqn (in lunar lander)
+* in the noise added in ddpg, change -env.action_space.low[0] to env.action_space.low[0] (no minus!)
