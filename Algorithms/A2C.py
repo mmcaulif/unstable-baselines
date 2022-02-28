@@ -49,7 +49,7 @@ class A2C:
         val, policy = self.forward(params, s_t)
         action_probs = policy/jnp.sum(policy)
         log_prob = jnp.log(action_probs)
-        policy_loss = -log_prob[a_t] * stop_gradient(val - r_t)
+        policy_loss = -(log_prob[a_t] * stop_gradient(val - r_t)).mean()
         entropy = -jnp.sum(action_probs * log_prob)
         return policy_loss + (entropy.mean() * self.entropy_coeff)
 
@@ -57,7 +57,7 @@ class A2C:
     def critic_loss(self, params, s_t, r_t):
         val, _ = self.forward(params, s_t)
         adv = val - r_t
-        return (0.5 * jnp.square(adv)) * self.value_coeff
+        return (0.5 * jnp.square(adv).mean()) * self.value_coeff
 
     @partial(jax.jit, static_argnums = 0)
     def loss(self, params, s_t, a_t, r_t):
@@ -139,20 +139,26 @@ s_t = env.reset()
 episodes = 0
 G = []
 
+s_buffer = deque(maxlen=agent.n_steps)
+a_buffer = deque(maxlen=agent.n_steps)
+r_buffer = deque(maxlen=agent.n_steps)
+
 for i in range(1, TRAIN_STEPS):
-    
-    """a_t = agent.act(params, s_t)
-    s_tp1, r_t, done, info = env.step(a_t)""" 
+    s_buffer.append(s_t)
+    a_t = agent.act(params, s_t)
+    a_buffer.append(a_t)
+    s_tp1, r_t, done, info = env.step(a_t)
+    r_buffer.append(r_t)
 
+    if i % agent.n_steps == 0 and i >= agent.n_steps:
+        j_s_buffer = jnp.asarray(s_buffer)
+        j_a_buffer = jnp.asarray(a_buffer)
+        j_r_buffer = jnp.asarray(r_buffer)
+        loss, params, optim_state = agent.update(params, j_s_buffer, j_a_buffer, j_r_buffer, optim_state)
 
-    #loss, params, optim_state = agent.update(params, s_t, a_t, r_t, optim_state)
+    s_t = s_tp1
 
-    #s_t = s_tp1
-
-    a_t, s_t, v, done, info = agent.rollout(params, s_t)
     #print(a_t, v)
-
-    loss, params, optim_state = agent.update(params, s_t, a_t, v, optim_state)
 
     if done:
         G.append(int(info['episode']['r']))
